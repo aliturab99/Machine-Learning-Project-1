@@ -93,26 +93,43 @@ st.title(f"📈 {APP_TITLE}")
 
 with st.sidebar:
     st.header("🎛️ Inputs")
-    followers = st.number_input("Creator followers (thousands)", 0.0, 1_000_000.0, 0.0, 0.1,
-                                help="Enter 250 for 250,000 followers.")
-    st.caption(f"= {followers * 1000:,.0f} followers")
-    engagement = st.number_input("Engagement rate (%)", 0.0, 100.0, 0.0, 0.1,
-                                 help="Enter 5.0 for 5%.")
-    spend = st.number_input("Paid boost spend (USD)", 0.0, 10_000_000.0, 0.0, 1.0)
-    content_format = st.selectbox("Content format", formats)
-    intent_tier = st.selectbox("Audience intent tier", tiers)
+    with st.form("campaign_prediction_form"):
+        followers = st.number_input(
+            "Creator followers (thousands)",
+            0.0,
+            1_000_000.0,
+            0.0,
+            0.1,
+            help="Enter 250 for 250,000 followers.",
+        )
+        st.caption(f"= {followers * 1000:,.0f} followers")
+        engagement = st.number_input(
+            "Engagement rate (%)",
+            0.0,
+            100.0,
+            0.0,
+            0.1,
+            help="Enter 5.0 for 5%.",
+        )
+        spend = st.number_input("Paid boost spend (USD)", 0.0, 10_000_000.0, 0.0, 1.0)
+        content_format = st.selectbox("Content format", formats)
+        intent_tier = st.selectbox("Audience intent tier", tiers)
+        submitted = st.form_submit_button("Predict campaign revenue", type="primary", use_container_width=True)
 
     if engagement > 30:
         st.warning("Engagement rate looks unusually high. Check it's entered as a percentage (5.0 = 5%).")
 
-base = {
-    "creator_followers_k": followers,
-    "engagement_rate_pct": engagement,
-    "paid_boost_spend_usd": spend,
-    "content_format": content_format,
-    "audience_intent_tier": intent_tier,
-}
-base_df = pd.DataFrame([base])
+if submitted:
+    st.session_state["submitted_campaign"] = {
+        "creator_followers_k": followers,
+        "engagement_rate_pct": engagement,
+        "paid_boost_spend_usd": spend,
+        "content_format": content_format,
+        "audience_intent_tier": intent_tier,
+    }
+
+base = st.session_state.get("submitted_campaign")
+base_df = pd.DataFrame([base]) if base is not None else None
 
 
 def safe_predict(df):
@@ -133,45 +150,47 @@ tab_pred, tab_grid = st.tabs(
 
 # ---------- Prediction ----------
 with tab_pred:
-    pred = float(safe_predict(base_df)[0])
-    c1, c2, c3 = st.columns([2, 1, 1])
-    c1.metric(TARGET_LABEL, fmt(pred))
-    c2.metric("Reach (followers)", f"{followers * 1000:,.0f}")
-    c3.metric("Spend per 1k followers", f"${spend / followers:,.2f}" if followers else "n/a")
+    if base is None:
+        st.info("Enter campaign details in the sidebar, then select **Predict campaign revenue**.")
+    else:
+        followers = base["creator_followers_k"]
+        spend = base["paid_boost_spend_usd"]
+        pred = float(safe_predict(base_df)[0])
+        c1, c2, c3 = st.columns([2, 1, 1])
+        c1.metric(TARGET_LABEL, fmt(pred))
+        c2.metric("Reach (followers)", f"{followers * 1000:,.0f}")
+        c3.metric("Spend per 1k followers", f"${spend / followers:,.2f}" if followers else "n/a")
 
-    st.subheader("Input summary")
-    st.dataframe(base_df.T.rename(columns={0: "value"}), use_container_width=True)
+        st.subheader("Input summary")
+        st.dataframe(base_df.T.rename(columns={0: "value"}), use_container_width=True)
 
-    # Spend uplift: what does paid boost add vs. zero spend?
-    zero = pd.DataFrame([{**base, "paid_boost_spend_usd": 0.0}])
-    p0 = float(safe_predict(zero)[0])
-    u1, u2 = st.columns(2)
-    u1.metric("Without paid boost", fmt(p0))
-    u2.metric("Lift from paid boost", fmt(pred - p0),
-              delta=f"{(pred - p0) / p0 * 100:,.1f}%" if p0 else None)
-
-    if st.button("➕ Save as scenario", type="primary"):
-        st.session_state.setdefault("scenarios", []).append({**base, "prediction": pred})
-        st.toast("Scenario saved")
+        zero = pd.DataFrame([{**base, "paid_boost_spend_usd": 0.0}])
+        p0 = float(safe_predict(zero)[0])
+        u1, u2 = st.columns(2)
+        u1.metric("Without paid boost", fmt(p0))
+        u2.metric("Lift from paid boost", fmt(pred - p0),
+                  delta=f"{(pred - p0) / p0 * 100:,.1f}%" if p0 else None)
 
 # ---------- Format x Intent ----------
 with tab_grid:
-    st.caption("Predicted outcome for every content format and audience tier at the current numeric inputs.")
-    combos = pd.DataFrame([{**base, "content_format": f, "audience_intent_tier": t}
-                           for f in formats for t in tiers])
-    combos["prediction"] = safe_predict(combos)
+    if base is None:
+        st.info("Submit campaign details in the sidebar to compare format and audience combinations.")
+    else:
+        st.caption("Predicted outcome for every content format and audience tier at the submitted numeric inputs.")
+        combos = pd.DataFrame([{**base, "content_format": f, "audience_intent_tier": t}
+                               for f in formats for t in tiers])
+        combos["prediction"] = safe_predict(combos)
 
-    heat = alt.Chart(combos).mark_rect().encode(
-        x=alt.X("audience_intent_tier:N", sort=tiers, title="Audience intent tier"),
-        y=alt.Y("content_format:N", sort=formats, title="Content format"),
-        color=alt.Color("prediction:Q", scale=alt.Scale(scheme="viridis"), title=TARGET_LABEL),
-        tooltip=["content_format", "audience_intent_tier", alt.Tooltip("prediction:Q", format=",.3f")])
-    text = heat.mark_text(baseline="middle").encode(
-        text=alt.Text("prediction:Q", format=",.1f"), color=alt.value("white"))
-    st.altair_chart(heat + text, use_container_width=True)
+        heat = alt.Chart(combos).mark_rect().encode(
+            x=alt.X("audience_intent_tier:N", sort=tiers, title="Audience intent tier"),
+            y=alt.Y("content_format:N", sort=formats, title="Content format"),
+            color=alt.Color("prediction:Q", scale=alt.Scale(scheme="viridis"), title=TARGET_LABEL),
+            tooltip=["content_format", "audience_intent_tier", alt.Tooltip("prediction:Q", format=",.3f")])
+        text = heat.mark_text(baseline="middle").encode(
+            text=alt.Text("prediction:Q", format=",.1f"), color=alt.value("white"))
+        st.altair_chart(heat + text, use_container_width=True)
 
-    best = combos.loc[combos["prediction"].idxmax()]
-    st.success(f"Best combination: **{best['content_format']}** × **{best['audience_intent_tier']}** → {fmt(best['prediction'])}")
-    st.dataframe(combos.sort_values("prediction", ascending=False).reset_index(drop=True),
-                 use_container_width=True)
-    template = pd.DataFrame([base])
+        best = combos.loc[combos["prediction"].idxmax()]
+        st.success(f"Best combination: **{best['content_format']}** × **{best['audience_intent_tier']}** → {fmt(best['prediction'])}")
+        st.dataframe(combos.sort_values("prediction", ascending=False).reset_index(drop=True),
+                     use_container_width=True)
