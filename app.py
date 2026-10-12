@@ -90,6 +90,11 @@ def fmt(v: float) -> str:
 # 3. SIDEBAR: MODEL + INPUTS
 # =====================================================================
 st.title(f"📈 {APP_TITLE}")
+st.page_link(
+    "pages/2_Return_Risk.py",
+    label="Open the Ecommerce Return Risk Classifier",
+    icon="📦",
+)
 
 with st.sidebar:
     st.header("🎛️ Inputs")
@@ -144,9 +149,7 @@ def safe_predict(df):
 # =====================================================================
 # 4. TABS
 # =====================================================================
-tab_pred, tab_grid = st.tabs(
-    ["🎯 Prediction", "🧩 Format × Intent"]
-)
+tab_pred, tab_grid = st.tabs(["🎯 Prediction", "🧩 Format × Intent"])
 
 # ---------- Prediction ----------
 with tab_pred:
